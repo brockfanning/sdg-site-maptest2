@@ -1,0 +1,91 @@
+# Welcome to Jekyll!
+#
+# This config file is meant for settings that affect your whole blog, values
+# which you are expected to set up once and rarely need to edit after that.
+# For technical reasons, this file is *NOT* reloaded automatically when you use
+# 'jekyll serve'. If you change this file, please restart the server process.
+
+# Site settings
+title: Indicators For The Sustainable Development Goals
+description: Data Platform Prototype
+baseurl: "/sdg-site-maptest" # the subpath of your site, e.g. /blog
+url: ""
+data_dir: data
+environment: staging
+remotedatabaseurl: "http://brock.tips/sdg-data-maptest"
+# permalink: /news/:year/:month/:day/:title.html
+
+jekyll_get_data:
+  - data: meta
+    json: 'http://brock.tips/sdg-data-maptest/meta/all.json'
+    # cache: true
+    # directory: 'remotedata'
+  - data: headlines
+    json: 'http://brock.tips/sdg-data-maptest/headline/all.json'
+    # cache: true
+    # directory: 'remotedata'
+  - data: schema
+    json: 'http://brock.tips/sdg-data-maptest/meta/schema.json'
+  - data: translations
+    # Pin to version 0.2.0 of the translation repository.
+    json: 'https://open-sdg.github.io/sdg-translations/translations-0.3.0.json'
+
+analytics:
+  ga_prod: ''
+
+###################################################################################################
+email_contacts:
+  questions: sustainabledevelopment@ons.gov.uk
+  suggestions: sustainabledevelopment@ons.gov.uk
+  functional: sustainabledevelopment@ons.gov.uk
+###################################################################################################
+
+# Github Repo for Data
+repo_name: sdg-data-maptest
+branch: develop
+org_name: brockfanning
+
+# Build settings
+markdown: kramdown
+
+# Travis Support
+exclude: [vendor, scripts, remotedata]
+
+# International Support
+# Eg name: Australia and adjective: Australian
+country:
+  name: Brock
+  adjective: Brock
+
+# Pages
+collections:
+  pages:
+    output: true
+    permalink: /:path/
+  posts:
+    output: true
+    permalink: /news/:year/:month/:day/:title.html
+  indicators:
+    output: true
+  goals:
+    output: true
+
+# The list of languages that are translated. The first one is the default.
+languages:
+  - en
+
+# This makes sure that all pages have a language.
+defaults:
+  -
+    scope:
+      path: ""
+    values:
+      language: "en"
+
+custom_css:
+  - /assets/css/leaflet-map.css
+
+plugins:
+  - jekyll-remote-theme
+
+remote_theme: open-sdg/open-sdg
