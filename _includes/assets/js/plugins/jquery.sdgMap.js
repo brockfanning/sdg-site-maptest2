@@ -2,7 +2,7 @@
  * TODO:
  * Integrate with high-contrast switcher.
  */
-(function($, L, chroma, window, document, undefined) {
+(function($, L, window, document) {
 
   // Create the defaults once
   var defaults = {
@@ -18,12 +18,7 @@
     minZoom: 5,
     maxZoom: 10,
     // Visual/choropleth considerations.
-    colorRange: ['#b4c5c1', '#004433'],
-    noValueColor: '#f0f0f0',
-    showSelectionLabels: true,
-    // Placement of map controls.
-    sliderPosition: 'bottomleft',
-    infoPosition: 'topright',
+    colorSteps: L.ColorBrewer.Sequential.Oranges[5],
   };
 
   // Defaults for each geoLayer.
@@ -43,8 +38,6 @@
 
   function Plugin(element, options) {
 
-    this.viewObj = options.viewObj;
-
     this.element = element;
     this.options = $.extend(true, {}, defaults, options);
 
@@ -63,15 +56,8 @@
     this._name = 'sdgMap';
 
     this.valueRange = [_.min(_.pluck(this.options.geoData, 'Value')), _.max(_.pluck(this.options.geoData, 'Value'))];
-    this.colorScale = chroma.scale(this.options.colorRange)
-      .domain(this.valueRange)
-      .classes(9);
-
     this.years = _.uniq(_.pluck(this.options.geoData, 'Year'));
     this.currentYear = this.years[0];
-
-    // Track the selected GeoJSON features.
-    this.selectedFeatures = [];
 
     // Use the ZoomShowHide library to control visibility ranges.
     this.zoomShowHide = new ZoomShowHide();
@@ -79,118 +65,27 @@
     // These variables will be set later.
     this.map = null;
 
-
     this.init();
   }
 
   Plugin.prototype = {
 
-    // Is this feature selected.
-    isFeatureSelected(check) {
-      var ret = false;
-      this.selectedFeatures.forEach(function(existing) {
-        if (check._leaflet_id == existing._leaflet_id) {
-          ret = true;
+    // Move the name data from GeoJson to the data records.
+    addNamesToRecords: function(features, idProperty, nameProperty) {
+      var featuresIndex = _.indexBy(_.map(features, function(feature) {
+        return feature.properties;
+      }), idProperty);
+      this.options.geoData.forEach(function(record) {
+        if (featuresIndex[record.GeoCode]) {
+          record.GeoJsonName = featuresIndex[record.GeoCode][nameProperty];
         }
       });
-      return ret;
     },
 
-    // Select a feature.
-    selectFeature(layer) {
-      // Update the data structure for selections.
-      this.selectedFeatures.push(layer);
-      // Pan to selection.
-      this.map.panTo(layer.getBounds().getCenter());
-      // Update the style.
-      layer.setStyle(layer.options.sdgLayer.styleOptionsSelected);
-      // Show a tooltip if necessary.
-      if (this.options.showSelectionLabels) {
-        var tooltipContent = layer.feature.properties[layer.options.sdgLayer.nameProperty];
-        var tooltipData = this.getData(layer.feature.properties[layer.options.sdgLayer.idProperty]);
-        if (tooltipData) {
-          tooltipContent += ': ' + tooltipData['Value'];
-        }
-        layer.bindTooltip(tooltipContent, {
-          permanent: true,
-        }).addTo(this.map);
-      }
-      // Update the info pane.
-      this.info.update();
-      // Bring layer to front.
-      if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
-        layer.bringToFront();
-      }
-    },
-
-    // Unselect a feature.
-    unselectFeature(layer) {
-      // Update the data structure for selections.
-      var stillSelected = [];
-      this.selectedFeatures.forEach(function(existing) {
-        if (layer._leaflet_id != existing._leaflet_id) {
-          stillSelected.push(existing);
-        }
-      });
-      this.selectedFeatures = stillSelected;
-
-      // Reset the feature's style.
-      layer.setStyle(layer.options.sdgLayer.styleOptions);
-
-      // Remove the tooltip if necessary.
-      if (layer.getTooltip()) {
-        layer.unbindTooltip();
-      }
-
-      // Update the info pane.
-      this.info.update();
-    },
-
-    // Get all of the GeoJSON layers.
-    getAllLayers: function() {
-      return L.featureGroup(this.zoomShowHide.layers);
-    },
-
-    // Get only the visible GeoJSON layers.
-    getVisibleLayers: function() {
+    // Get only the visible GeoJSON layer.
+    getVisibleLayer: function() {
       // Unfortunately relies on an internal of the ZoomShowHide library.
-      return this.zoomShowHide._layerGroup;
-    },
-
-    // Update the colors of the Features on the map.
-    updateColors: function() {
-      var plugin = this;
-      this.getAllLayers().eachLayer(function(layer) {
-        layer.setStyle(function(feature) {
-          return {
-            fillColor: plugin.getColor(feature.properties, layer.sdgOptions.idProperty),
-          }
-        });
-      });
-    },
-
-    // Get the local (CSV) data corresponding to a GeoJSON "feature" with the
-    // corresponding data.
-    getData: function(geocode) {
-      var conditions = {
-        GeoCode: geocode,
-        Year: this.currentYear,
-      }
-      var matches = _.where(this.options.geoData, conditions);
-      if (matches.length) {
-        return matches[0];
-      }
-      else {
-        return false;
-      }
-    },
-
-    // Choose a color for a GeoJSON feature.
-    getColor: function(props, idProperty) {
-      var thisID = props[idProperty];
-      // Otherwise return a color based on the data.
-      var localData = this.getData(thisID);
-      return (localData) ? this.colorScale(localData['Value']).hex() : this.options.noValueColor;
+      return this.zoomShowHide._layerGroup.getLayers()[0];
     },
 
     // Zoom to a feature.
@@ -208,16 +103,14 @@
       this.map.setView([0, 0], 0);
       this.zoomShowHide.addTo(this.map);
 
-      // Remove zoom control on mobile.
-      if (L.Browser.mobile) {
-        this.map.removeControl(this.map.zoomControl);
-      }
-
-      // Add full-screen functionality.
+      // Add full-screen button.
       this.map.addControl(new L.Control.Fullscreen());
 
+      // Add Leaflet DVF legend.
+      this.map.addControl(new L.Control.Legend());
+
       // Add tile imagery.
-      //L.tileLayer(this.options.tileURL, this.options.tileOptions).addTo(this.map);
+      L.tileLayer(this.options.tileURL, this.options.tileOptions).addTo(this.map);
 
       // Because after this point, "this" rarely works.
       var plugin = this;
@@ -241,7 +134,7 @@
       var timeDimensionControlOptions = {
         player: player,
         timeDimension: timeDimension,
-        position: this.options.sliderPosition,
+        position: 'bottomleft',
         timeSliderDragUpdate: true,
         speedSlider: false,
       };
@@ -257,71 +150,8 @@
       // Listen to year changes to update the map colors.
       timeDimension.on('timeload', function(e) {
         plugin.currentYear = new Date(e.time).getFullYear();
-        plugin.updateColors();
-        plugin.info.update();
+        plugin.getVisibleLayer().reloadData();
       });
-
-      // Helper function to round values for the legend.
-      function round(value) {
-        return Math.round(value * 100) / 100;
-      }
-
-      // Add the info pane.
-      var info = L.control();
-      info.onAdd = function() {
-        this._div = L.DomUtil.create('div', 'leaflet-control info');
-        this._features = L.DomUtil.create('ul', 'feature-list', this._div);
-        this._legend = L.DomUtil.create('div', 'legend', this._div);
-        this._legendValues = L.DomUtil.create('div', 'legend-values', this._div);
-        var grades = chroma.limits(plugin.valueRange, 'e', 9).reverse();
-        for (var i = 0; i < grades.length; i++) {
-          this._legend.innerHTML += '<span class="info-swatch" style="background:' + plugin.colorScale(grades[i]).hex() + '"></span>';
-        }
-        this._legendValues.innerHTML += '<span class="legend-value left">' + plugin.valueRange[1] + '</span><span class="arrow left"></span>';
-        this._legendValues.innerHTML += '<span class="legend-value right">' + plugin.valueRange[0] + '</span><span class="arrow right"></span>';
-
-        return this._div;
-      }
-      info.update = function() {
-        this._features.innerHTML = '';
-        var pane = this;
-        if (plugin.selectedFeatures.length) {
-          plugin.selectedFeatures.forEach(function(layer) {
-            var item = L.DomUtil.create('li', '', pane._features);
-            var props = layer.feature.properties;
-            var localData = plugin.getData(props[layer.options.sdgLayer.idProperty]);
-            var name, value, bar;
-            if (localData['Value']) {
-              var fraction = (localData['Value'] - plugin.valueRange[0]) / (plugin.valueRange[1] - plugin.valueRange[0]);
-              var percentage = Math.round(fraction * 100);
-              name = '<span class="info-name">' + props[layer.options.sdgLayer.nameProperty] + '</span>';
-              value = '<span class="info-value" style="right: ' + percentage + '%">' + localData['Value'] + '</span>';
-              bar = '<span class="info-bar" style="display: inline-block; width: ' + percentage + '%"></span>';
-            }
-            else {
-              name = '<span class="info-name info-no-value">' + props[layer.options.sdgLayer.nameProperty] + '</span>';
-              value = '';
-              bar = '';
-            }
-            item.innerHTML = bar + value + name + '<i class="info-close fa fa-remove"></i>';
-            $(item).click(function(e) {
-              plugin.unselectFeature(layer);
-            });
-            // Make sure that the value is not overlapping with the name.
-            var nameWidth = $(item).find('.info-name').width();
-            var barWidth = $(item).find('.info-bar').width();
-            if (barWidth < nameWidth) {
-              // If the bar is shorter than the name, bump out the value.
-              // Adding 25 makes it come out right.
-              var valueMargin = (nameWidth - barWidth) + 25;
-              $(item).find('.info-value').css('margin-right', valueMargin + 'px');
-            }
-          });
-        }
-      }
-      info.setPosition(this.options.infoPosition);
-      info.addTo(this.map);
-      this.info = info;
 
       // At this point we need to load the GeoJSON layer/s.
       var geoURLs = this.options.geoLayers.map(function(item) {
@@ -329,38 +159,54 @@
       });
       $.when.apply($, geoURLs).done(function() {
 
-        function onEachFeature(feature, layer) {
-          layer.on({
-            click: clickHandler,
-          });
-        }
-
         var geoJsons = arguments;
         for (var i in geoJsons) {
-          var layer = L.geoJson(geoJsons[i], {
-            // Tack on the custom options here to access them later.
-            sdgLayer: plugin.options.geoLayers[i],
-            style: plugin.options.geoLayers[i].styleOptions,
-            onEachFeature: onEachFeature,
+
+          var geoJson = geoJsons[i][0];
+          var idProperty = plugin.options.geoLayers[i].idProperty;
+          var nameProperty = plugin.options.geoLayers[i].nameProperty;
+          var colorFunction = new L.CustomColorFunction(plugin.valueRange[0], plugin.valueRange[1], plugin.options.colorSteps, {
+            interpolate: true,
           });
+          plugin.addNamesToRecords(geoJson.features, idProperty, nameProperty);
+
+          var choroplethOptions = {
+            recordsField: null,
+            locationMode: L.LocationModes.LOOKUP,
+            locationLookup: geoJson,
+            codeField: 'GeoCode',
+            locationIndexField: idProperty,
+            locationTextField: 'GeoJsonName',
+            filter: function(record) {
+              return record.Year == plugin.currentYear;
+            },
+            displayOptions: {
+              Value: {
+                displayName: 'Value',
+                fillColor: colorFunction,
+                color: colorFunction,
+              },
+            },
+            layerOptions: {
+              fillOpacity: 0.8,
+              opacity: 1,
+              weight: 1,
+              //numberOfSides: 50
+            },
+            tooltipOptions: {
+              iconSize: new L.Point(80,55),
+              iconAnchor: new L.Point(-5,55)
+            },
+            getIndexKey: function (location, record) {
+              return record.GeoCode + '-' + record.Year;
+            }
+          };
+
+          var layer = new L.ChoroplethDataLayer(plugin.options.geoData, choroplethOptions);
           layer.min_zoom = plugin.options.geoLayers[i].min_zoom;
           layer.max_zoom = plugin.options.geoLayers[i].max_zoom;
-          // Store our custom options here, for easier access.
-          layer.sdgOptions = plugin.options.geoLayers[i];
           // Add the layer to the ZoomShowHide group.
           plugin.zoomShowHide.addLayer(layer);
-        }
-        plugin.updateColors();
-
-        // Event handler for click/touch.
-        function clickHandler(e) {
-          var layer = e.target;
-          if (plugin.isFeatureSelected(layer)) {
-            plugin.unselectFeature(layer);
-          }
-          else {
-            plugin.selectFeature(layer);
-          }
         }
       });
 
@@ -372,16 +218,9 @@
           // Fix the size.
           plugin.map.invalidateSize();
           // Also zoom in/out as needed.
-          plugin.zoomToFeature(plugin.getVisibleLayers());
+          plugin.zoomToFeature(plugin.getVisibleLayer());
           // Limit the panning to what we care about.
-          plugin.map.setMaxBounds(plugin.getVisibleLayers().getBounds());
-          // Make sure the info pane is not too wide for the map.
-          var $infoPane = $('.info.leaflet-control');
-          var widthPadding = 20;
-          var maxWidth = $('#map').width() - widthPadding;
-          if ($infoPane.width() > maxWidth) {
-            $infoPane.width(maxWidth);
-          }
+          plugin.map.setMaxBounds(plugin.getVisibleLayer().getBounds());
           // Make sure the map is not too high.
           var heightPadding = 50;
           var maxHeight = $(window).height() - heightPadding;
@@ -402,4 +241,4 @@
       }
     });
   };
-})(jQuery, L, chroma, window, document);
+})(jQuery, L, window, document);
